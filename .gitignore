@@ -80,3 +80,6 @@ coverage.xml
 
 # Distribution / packaging
 MANIFEST
+
+# Utility folders for dev use
+notes/
