@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
+from .llm_providers import Provider
+
 
 class OutputFormat(str, Enum):
     MARKDOWN = "markdown"
@@ -17,5 +19,5 @@ class Config:
     repo_path: Path = field(default_factory=Path.cwd)
     output_format: OutputFormat = OutputFormat.MARKDOWN
     output_file: Path | None = None
-    model_provider: str
-    model_name: str
+    provider: Provider = Provider.OPENAI
+    model: str = "gpt-4o"
