@@ -28,6 +28,8 @@ def generate(
     output_file: Path | None = typer.Option(
         None, "--output", "-o", help="Write output to this file instead of stdout."
     ),
+    model_provider: str = typer.Option("openai", "--model-provider", help="LLM provider (openai, anthropic, etc.)."),
+    model_name: str = typer.Option("gpt-oss-120b", "--model-name", help="Name of the LLM to use.")
 ) -> None:
     """Generate release notes between two refs."""
     config = Config(
@@ -36,6 +38,8 @@ def generate(
         repo_path=repo,
         output_format=output_format,
         output_file=output_file,
+        model_provider=model_provider,
+        model_name=model_name
     )
 
     console.print(

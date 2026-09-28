@@ -17,3 +17,5 @@ class Config:
     repo_path: Path = field(default_factory=Path.cwd)
     output_format: OutputFormat = OutputFormat.MARKDOWN
     output_file: Path | None = None
+    model_provider: str
+    model_name: str
