@@ -6,6 +6,8 @@ import typer
 from rich.console import Console
 
 from .config import Config, OutputFormat
+from .generator import generate_notes
+
 
 app = typer.Typer(
     name="vaquita",
@@ -40,4 +42,6 @@ def generate(
         f"[bold]vaquita[/bold] · generating notes from "
         f"[cyan]{config.from_ref}[/cyan] → [cyan]{config.to_ref}[/cyan]"
     )
-    console.print("[yellow]Core generation not yet implemented.[/yellow]")
+    
+    console.print(generate_notes(config))
+
