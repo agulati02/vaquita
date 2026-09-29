@@ -18,6 +18,8 @@ class Commit:
     sha: str
     message: str
     author: str
+    email: str = ""
+    timestamp: str = ""
     pr_number: int | None = None
     pr_title: str | None = None
 

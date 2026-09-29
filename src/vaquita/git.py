@@ -10,11 +10,11 @@ def get_commits(repo_path: Path, from_ref: str, to_ref: str) -> list[Commit]:
     """Return commits reachable from to_ref but not from_ref."""
     def to_commit_dto(c: git.Commit) -> Commit:
         return Commit(
-            hash=c.hexsha,
+            sha=c.hexsha,
             message=c.message,
             author=c.author.name,
             email=c.author.email,
-            timestamp=c.committed_datetime,
+            timestamp=str(c.committed_datetime),
         )
     repo = git.Repo(repo_path)
     commits = list(repo.iter_commits(f"{from_ref}..{to_ref}"))
