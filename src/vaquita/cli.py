@@ -38,8 +38,8 @@ def generate(
         repo_path=repo,
         output_format=output_format,
         output_file=output_file,
-        model_provider=model_provider,
-        model_name=model_name
+        provider=model_provider,
+        model=model_name
     )
 
     console.print(
