@@ -31,7 +31,7 @@ class Provider(str, Enum):
 # Provider factories
 # ---------------------------------------------------------------------------
 
-def _make_openai_client(model: str) -> LLMClient:
+def _make_openai_client(model: str, system_prompt: str) -> LLMClient:
     """Return an OpenAI chat completion client for the given model."""
     try:
         from openai import OpenAI  # type: ignore[import-untyped]
@@ -44,16 +44,17 @@ def _make_openai_client(model: str) -> LLMClient:
     _client = OpenAI()
 
     def call(prompt: str) -> str:
-        response = _client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        response = _client.chat.completions.create(model=model, messages=messages)
         return response.choices[0].message.content or ""
 
     return call
 
 
-def _make_anthropic_client(model: str) -> LLMClient:
+def _make_anthropic_client(model: str, system_prompt: str) -> LLMClient:
     """Return an Anthropic messages client for the given model."""
     try:
         import anthropic  # type: ignore[import-untyped]
@@ -66,17 +67,20 @@ def _make_anthropic_client(model: str) -> LLMClient:
     _client = anthropic.Anthropic()
 
     def call(prompt: str) -> str:
-        message = _client.messages.create(
+        kwargs: dict = dict(
             model=model,
             max_tokens=4096,
             messages=[{"role": "user", "content": prompt}],
         )
+        if system_prompt:
+            kwargs["system"] = system_prompt
+        message = _client.messages.create(**kwargs)
         return message.content[0].text
 
     return call
 
 
-def _make_mistral_client(model: str) -> LLMClient:
+def _make_mistral_client(model: str, system_prompt: str) -> LLMClient:
     """Return a Mistral chat client for the given model."""
     try:
         from mistralai import Mistral  # type: ignore[import-untyped]
@@ -89,10 +93,11 @@ def _make_mistral_client(model: str) -> LLMClient:
     _client = Mistral()
 
     def call(prompt: str) -> str:
-        response = _client.chat.complete(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        response = _client.chat.complete(model=model, messages=messages)
         return response.choices[0].message.content or ""
 
     return call
@@ -102,7 +107,7 @@ def _make_mistral_client(model: str) -> LLMClient:
 # Registry
 # ---------------------------------------------------------------------------
 
-_REGISTRY: dict[Provider, Callable[[str], LLMClient]] = {
+_REGISTRY: dict[Provider, Callable[[str, str], LLMClient]] = {
     Provider.OPENAI: _make_openai_client,
     Provider.ANTHROPIC: _make_anthropic_client,
     Provider.MISTRAL: _make_mistral_client,
@@ -113,14 +118,13 @@ _REGISTRY: dict[Provider, Callable[[str], LLMClient]] = {
 # Public factory
 # ---------------------------------------------------------------------------
 
-def get_client(provider: Provider | str, model: str) -> LLMClient:
+def get_client(provider: Provider | str, model: str, system_prompt: str = "") -> LLMClient:
     """Return an LLMClient for the given provider and model.
 
     Args:
-        provider: A Provider enum value or its string equivalent
-                  ("openai", "anthropic", "mistral").
-        model:    The model identifier to pass to the provider's API
-                  (e.g. "gpt-4o", "claude-opus-4-5", "mistral-large-latest").
+        provider:      A Provider enum value or its string equivalent.
+        model:         The model identifier (e.g. "gpt-4o", "claude-opus-4-5").
+        system_prompt: Optional system prompt to prepend to every call.
 
     Returns:
         A callable ``(prompt: str) -> str`` backed by the requested provider.
@@ -138,4 +142,4 @@ def get_client(provider: Provider | str, model: str) -> LLMClient:
         )
 
     factory = _REGISTRY[resolved]
-    return factory(model)
+    return factory(model, system_prompt)

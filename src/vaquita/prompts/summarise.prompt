@@ -1,0 +1,31 @@
+Analyse the git commits and diff below and produce structured release notes.
+
+## Output schema
+
+Respond with only valid JSON matching this schema exactly — no markdown fences, no extra text:
+
+{
+    "sections": [
+        {
+            "title": "string",
+            "changes": ["string"]
+        }
+    ]
+}
+
+Use one of these titles for each section (only include sections that have relevant changes):
+- "Breaking Changes"
+- "New Features"
+- "Bug Fixes"
+- "Documentation"
+- "Chores & Maintenance"
+
+## Input
+
+### Commits
+
+{commits}
+
+### Diff
+
+{diff}
