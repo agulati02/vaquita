@@ -1,24 +1,11 @@
-"""Functional factory pattern for LLM clients.
-
-Each provider is a factory function that accepts a model name and returns a
-callable with a uniform signature:
-
-    client(prompt: str) -> str
-
-New providers are registered by adding an entry to _REGISTRY
-"""
-
 from __future__ import annotations
 
 from enum import Enum
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
-
-# ---------------------------------------------------------------------------
-# Public API types
-# ---------------------------------------------------------------------------
-
-LLMClient = Callable[[str], str]
+if TYPE_CHECKING:
+    from .models import Message, Response
+    from .tool_registry import ToolDef
 
 
 class Provider(str, Enum):
@@ -27,84 +14,168 @@ class Provider(str, Enum):
     MISTRAL = "mistral"
 
 
+LLMClient = Callable[["list[Message]", "list[ToolDef] | None"], "Response"]
+
+
+# ---------------------------------------------------------------------------
+# Message serialisers
+# ---------------------------------------------------------------------------
+
+def _openai_messages(messages: list[Message]) -> list[dict]:
+    out = []
+    for m in messages:
+        if m.role == "tool":
+            out.append({"role": "tool", "tool_call_id": m.tool_call_id, "content": m.content or ""})
+        elif m.role == "assistant" and m.tool_call:
+            out.append({
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": m.tool_call.call_id,
+                    "type": "function",
+                    "function": {"name": m.tool_call.name, "arguments": __import__("json").dumps(m.tool_call.args)},
+                }],
+            })
+        else:
+            out.append({"role": m.role, "content": m.content or ""})
+    return out
+
+
+def _anthropic_messages(messages: list[Message]) -> tuple[str, list[dict]]:
+    system = ""
+    out = []
+    for m in messages:
+        if m.role == "system":
+            system = m.content or ""
+            continue
+        if m.role == "assistant" and m.tool_call:
+            out.append({
+                "role": "assistant",
+                "content": [{
+                    "type": "tool_use",
+                    "id": m.tool_call.call_id,
+                    "name": m.tool_call.name,
+                    "input": m.tool_call.args,
+                }],
+            })
+        elif m.role == "tool":
+            out.append({
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": m.tool_call_id,
+                    "content": m.content or "",
+                }],
+            })
+        else:
+            out.append({"role": m.role, "content": m.content or ""})
+    return system, out
+
+
+# ---------------------------------------------------------------------------
+# Tool definition serialisers
+# ---------------------------------------------------------------------------
+
+def _openai_tools(tools: list[ToolDef]) -> list[dict]:
+    return [{"type": "function", "function": {"name": t.name, "description": t.description, "parameters": t.parameters}} for t in tools]
+
+
+def _anthropic_tools(tools: list[ToolDef]) -> list[dict]:
+    return [{"name": t.name, "description": t.description, "input_schema": t.parameters} for t in tools]
+
+
 # ---------------------------------------------------------------------------
 # Provider factories
 # ---------------------------------------------------------------------------
 
 def _make_openai_client(model: str, system_prompt: str) -> LLMClient:
-    """Return an OpenAI chat completion client for the given model."""
     try:
-        from openai import OpenAI  # type: ignore[import-untyped]
+        from openai import OpenAI
     except ImportError as exc:
-        raise ImportError(
-            "openai package is required for the OpenAI provider. "
-            "Install it with: uv add openai"
-        ) from exc
+        raise ImportError("openai package required. Install with: uv add openai") from exc
+
+    import json
+    from .models import Response, ToolCall
 
     _client = OpenAI()
 
-    def call(prompt: str) -> str:
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-        response = _client.chat.completions.create(model=model, messages=messages)
-        return response.choices[0].message.content or ""
+    def call(messages: list[Message], tools: list[ToolDef] | None = None) -> Response:
+        msgs = _openai_messages(messages)
+        kwargs: dict = {"model": model, "messages": msgs}
+        if tools:
+            kwargs["tools"] = _openai_tools(tools)
+        resp = _client.chat.completions.create(**kwargs)
+        choice = resp.choices[0].message
+        if choice.tool_calls:
+            tc = choice.tool_calls[0]
+            return Response(tool_call=ToolCall(
+                name=tc.function.name,
+                args=json.loads(tc.function.arguments),
+                call_id=tc.id,
+            ))
+        return Response(content=choice.content or "")
 
     return call
 
 
 def _make_anthropic_client(model: str, system_prompt: str) -> LLMClient:
-    """Return an Anthropic messages client for the given model."""
     try:
-        import anthropic  # type: ignore[import-untyped]
+        import anthropic
     except ImportError as exc:
-        raise ImportError(
-            "anthropic package is required for the Anthropic provider. "
-            "Install it with: uv add anthropic"
-        ) from exc
+        raise ImportError("anthropic package required. Install with: uv add anthropic") from exc
+
+    from .models import Response, ToolCall
 
     _client = anthropic.Anthropic()
 
-    def call(prompt: str) -> str:
-        kwargs: dict = dict(
-            model=model,
-            max_tokens=4096,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        if system_prompt:
-            kwargs["system"] = system_prompt
-        message = _client.messages.create(**kwargs)
-        return message.content[0].text
+    def call(messages: list[Message], tools: list[ToolDef] | None = None) -> Response:
+        system, msgs = _anthropic_messages(messages)
+        kwargs: dict = {"model": model, "max_tokens": 4096, "messages": msgs}
+        if system:
+            kwargs["system"] = system
+        if tools:
+            kwargs["tools"] = _anthropic_tools(tools)
+        resp = _client.messages.create(**kwargs)
+        for block in resp.content:
+            if block.type == "tool_use":
+                return Response(tool_call=ToolCall(name=block.name, args=block.input, call_id=block.id))
+        text = next((b.text for b in resp.content if hasattr(b, "text")), "")
+        return Response(content=text)
 
     return call
 
 
 def _make_mistral_client(model: str, system_prompt: str) -> LLMClient:
-    """Return a Mistral chat client for the given model."""
     try:
-        from mistralai import Mistral  # type: ignore[import-untyped]
+        from mistralai import Mistral
     except ImportError as exc:
-        raise ImportError(
-            "mistralai package is required for the Mistral provider. "
-            "Install it with: uv add mistralai"
-        ) from exc
+        raise ImportError("mistralai package required. Install with: uv add mistralai") from exc
+
+    import json
+    from .models import Response, ToolCall
 
     _client = Mistral()
 
-    def call(prompt: str) -> str:
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-        response = _client.chat.complete(model=model, messages=messages)
-        return response.choices[0].message.content or ""
+    def call(messages: list[Message], tools: list[ToolDef] | None = None) -> Response:
+        msgs = _openai_messages(messages)
+        kwargs: dict = {"model": model, "messages": msgs}
+        if tools:
+            kwargs["tools"] = _openai_tools(tools)
+        resp = _client.chat.complete(**kwargs)
+        choice = resp.choices[0].message
+        if choice.tool_calls:
+            tc = choice.tool_calls[0]
+            return Response(tool_call=ToolCall(
+                name=tc.function.name,
+                args=json.loads(tc.function.arguments),
+                call_id=tc.id,
+            ))
+        return Response(content=choice.content or "")
 
     return call
 
 
 # ---------------------------------------------------------------------------
-# Registry
+# Registry and public factory
 # ---------------------------------------------------------------------------
 
 _REGISTRY: dict[Provider, Callable[[str, str], LLMClient]] = {
@@ -114,32 +185,10 @@ _REGISTRY: dict[Provider, Callable[[str, str], LLMClient]] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Public factory
-# ---------------------------------------------------------------------------
-
 def get_client(provider: Provider | str, model: str, system_prompt: str = "") -> LLMClient:
-    """Return an LLMClient for the given provider and model.
-
-    Args:
-        provider:      A Provider enum value or its string equivalent.
-        model:         The model identifier (e.g. "gpt-4o", "claude-opus-4-5").
-        system_prompt: Optional system prompt to prepend to every call.
-
-    Returns:
-        A callable ``(prompt: str) -> str`` backed by the requested provider.
-
-    Raises:
-        ValueError: If the provider is not registered.
-        ImportError: If the provider's SDK is not installed.
-    """
     try:
         resolved = Provider(provider)
     except ValueError:
         supported = ", ".join(p.value for p in Provider)
-        raise ValueError(
-            f"Unknown provider {provider!r}. Supported providers: {supported}"
-        )
-
-    factory = _REGISTRY[resolved]
-    return factory(model, system_prompt)
+        raise ValueError(f"Unknown provider {provider!r}. Supported: {supported}")
+    return _REGISTRY[resolved](model, system_prompt)

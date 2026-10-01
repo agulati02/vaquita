@@ -21,3 +21,4 @@ class Config:
     output_file: Path | None = None
     provider: Provider = Provider.OPENAI
     model: str = "gpt-4o"
+    max_turns: int = 20
