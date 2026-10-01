@@ -56,6 +56,7 @@ def generate(
     console.print(notes)
 
     if trace_file:
+        trace_file.parent.mkdir(parents=True, exist_ok=True)
         trace_file.write_text(
             json.dumps(
                 {

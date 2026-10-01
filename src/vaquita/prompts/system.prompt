@@ -31,6 +31,25 @@ Do not fetch lock files, vendored code, or generated files — their tags will b
 
 - Respond with **only valid JSON** — no markdown code fences, no preamble, no explanation.
 - Do not include any text outside the JSON object.
-- The JSON must strictly conform to the schema provided in the user prompt.
+- The JSON must strictly conform to this schema:
+
+```
+{
+    "sections": [
+        {
+            "title": "string",
+            "changes": ["string"]
+        }
+    ]
+}
+```
+
+- Use only these section titles (omit sections with no relevant changes):
+  - "Breaking Changes"
+  - "New Features"
+  - "Bug Fixes"
+  - "Documentation"
+  - "Chores & Maintenance"
+
 - Use clear, concise English in bullet point entries. Write for a technical audience (developers and maintainers), not end users.
 - Each entry should be one sentence. Start with an imperative verb (e.g. "Add", "Fix", "Remove", "Update").
